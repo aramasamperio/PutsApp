@@ -40,13 +40,13 @@ if st.button('Run Market Scan'):
             # Price Fetching Logic
             price = None
             try:
-                price = stock.fast_info.get('last_price')
+                price = stock.fast_info['last_price']
             except:
                 pass
             if price is None or np.isnan(price):
                 price = stock.history(period='1d')['Close'].iloc[-1]
 
-            for exp in stock.options[:5]: # Next 5 expiries
+            for exp in stock.options:
                 days = (datetime.strptime(exp, '%Y-%m-%d') - datetime.now()).days
                 if not (20 <= days <= 160): continue
 
@@ -54,7 +54,10 @@ if st.button('Run Market Scan'):
                 puts = chain.puts[(chain.puts['strike'] < price) & (chain.puts['strike'] >= price * (1-strike_dist_pct))]
 
                 for _, row in puts.iterrows():
-                    opt_price = (row['bid'] + row['ask'])/2 if row['bid']>0 else row['lastPrice']
+                    # Fallback pricing: mid if available, else lastPrice
+                    bid, ask, last = row.get('bid', 0), row.get('ask', 0), row.get('lastPrice', 0)
+                    opt_price = (bid + ask)/2 if (bid > 0 and ask > 0) else last
+                    
                     if opt_price <= 0.01: continue
                     ann_ret = (opt_price / row['strike']) * (365 / days) * 100
 
@@ -62,7 +65,7 @@ if st.button('Run Market Scan'):
                         delta = get_delta(price, row['strike'], days/365, risk_free, vol)
                         results.append({
                             'Ticker': symbol, 'Expiry': exp, 'Strike': row['strike'],
-                            'Price': opt_price, 'Return %': round(ann_ret, 2), 'Delta': round(delta, 3)
+                            'Opt Price': round(opt_price, 3), 'Return %': round(ann_ret, 2), 'Delta': round(delta, 3)
                         })
         except:
             continue
@@ -70,6 +73,6 @@ if st.button('Run Market Scan'):
 
     if results:
         df = pd.DataFrame(results)
-        st.dataframe(df.style.background_gradient(subset=['Return %'], cmap='RdYlGn'))
+        st.dataframe(df.sort_values('Return %', ascending=False).style.background_gradient(subset=['Return %'], cmap='RdYlGn'))
     else:
-        st.warning('No options met your criteria.')
+        st.warning('No options met your criteria. Try lowering the Min Annual Return.')
