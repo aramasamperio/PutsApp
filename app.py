@@ -4,10 +4,12 @@ import pandas as pd
 import numpy as np
 from scipy.stats import norm
 from datetime import datetime
+import time
+import random
 
 # --- APP SETUP ---
-st.set_page_config(page_title='OTM Put Scanner - Enhanced', layout='wide')
-st.title('⌛ OTM Put Option Scanner (Debug Mode)')
+st.set_page_config(page_title='OTM Put Scanner - Rate Limit Protected', layout='wide')
+st.title('⌛ OTM Put Option Scanner (Throttled Mode)')
 
 # --- SIDEBAR ---
 st.sidebar.header('Parameters')
@@ -34,14 +36,14 @@ if st.button('Run Market Scan'):
     ticker_list = [t.strip() for t in tickers_input.split(',')]
     results = []
     progress_bar = st.progress(0)
-    debug_container = st.expander("Detailed Debug Logs", expanded=True)
+    debug_container = st.expander("Throttled Data Logs", expanded=True)
 
     for idx, symbol in enumerate(ticker_list):
         try:
             stock = yf.Ticker(symbol)
-            vol = get_vol(stock)
-
-            # --- ENHANCED PRICE FETCHING ---
+            # Small delay between tickers to avoid rate limiting
+            time.sleep(random.uniform(0.5, 1.5))
+            
             price = None
             try:
                 price = stock.fast_info['last_price']
@@ -53,35 +55,38 @@ if st.button('Run Market Scan'):
                 except: pass
 
             if price is None or np.isnan(price):
-                debug_container.error(f"❌ {symbol}: Could not fetch current market price.")
+                debug_container.error(f"❌ {symbol}: Failed to fetch price. Skipping.")
                 continue
 
+            vol = get_vol(stock)
             expirations = stock.options
+            
             if not expirations:
-                debug_container.warning(f"⚠️ {symbol}: No option expirations found in Yahoo Finance.")
+                debug_container.warning(f"⚠️ {symbol}: No options found.")
                 continue
 
             valid_expiry_count = 0
-            for exp in expirations[:15]: # Scan first 15 expiries
+            # We only check a few expiries to keep request count low
+            for exp in expirations[:8]: 
                 days = (datetime.strptime(exp, '%Y-%m-%d') - datetime.now()).days
                 if not (20 <= days <= 160): continue
                 
                 valid_expiry_count += 1
+                # Delay between option chain requests
+                time.sleep(random.uniform(0.3, 0.8))
+                
                 try:
                     chain = stock.option_chain(exp)
                     puts = chain.puts[(chain.puts['strike'] < price) & (chain.puts['strike'] >= price * (1-strike_dist_pct))]
 
-                    if puts.empty:
-                        debug_container.info(f"ℹ️ {symbol} [{exp}]: No strikes met distance criteria ({strike_dist_pct*100}% OTM).")
-                        continue
+                    if puts.empty: continue
 
                     for _, row in puts.iterrows():
                         bid, ask, last = row.get('bid', 0), row.get('ask', 0), row.get('lastPrice', 0)
                         opt_price = (bid + ask)/2 if (bid > 0 and ask > 0) else last
-
                         if opt_price <= 0.01: continue
+                        
                         ann_ret = (opt_price / row['strike']) * (365 / days) * 100
-
                         if ann_ret >= min_return:
                             delta = get_delta(price, row['strike'], days/365, risk_free, vol)
                             results.append({
@@ -89,10 +94,12 @@ if st.button('Run Market Scan'):
                                 'Opt Price': round(opt_price, 3), 'Return %': round(ann_ret, 2), 'Delta': round(delta, 3)
                             })
                 except Exception as e:
-                    debug_container.write(f"Error fetching chain for {symbol} {exp}: {e}")
-            
-            if valid_expiry_count == 0:
-                debug_container.warning(f"⚠️ {symbol}: No expirations found in the 20-160 day window.")
+                    if "Too Many Requests" in str(e):
+                        st.error("Rate limit hit! Cooling down for 5 seconds...")
+                        time.sleep(5)
+                    debug_container.write(f"Error processing {symbol} {exp}: {e}")
+
+            debug_container.write(f"✅ {symbol} processed.")
 
         except Exception as e:
             debug_container.error(f"Global error for {symbol}: {e}")
@@ -104,4 +111,4 @@ if st.button('Run Market Scan'):
         st.subheader("Scan Results")
         st.dataframe(df.sort_values('Return %', ascending=False).style.background_gradient(subset=['Return %'], cmap='RdYlGn'))
     else:
-        st.warning('No options met your criteria. Try lowering the "Min Annual Return %" or increasing the "Max Strike Distance %" in the sidebar.')
+        st.warning('No results found. Try adjusting parameters or scanning fewer tickers at once.')
