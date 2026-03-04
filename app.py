@@ -64,49 +64,76 @@ def get_delta(S, K, T, r, sigma):
 # -----------------------
 # CACHE PER TICKER
 # -----------------------
-@st.cache_data(ttl=600)  # 10 min cache
+import time
+import random
+
+@st.cache_data(ttl=600)
 def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free):
     results = []
 
-    stock = yf.Ticker(symbol)
-    price = stock.fast_info.get('last_price')
+    try:
+        stock = yf.Ticker(symbol)
 
-    if not price:
+        # small pause before each ticker
+        time.sleep(random.uniform(0.4, 0.8))
+
+        price = stock.fast_info.get('last_price')
+
+        if not price:
+            hist = stock.history(period='1d')
+            if hist.empty:
+                return []
+            price = hist['Close'].iloc[-1]
+
+        vol = get_vol(stock)
+
+        expiries = stock.options
+        if not expiries:
+            return []
+
+        for exp in expiries[:6]:  # fewer calls = safer
+            days = (datetime.strptime(exp, '%Y-%m-%d') - datetime.now()).days
+            if not (20 <= days <= 160):
+                continue
+
+            # pause before each option chain request
+            time.sleep(random.uniform(0.3, 0.6))
+
+            try:
+                chain = stock.option_chain(exp)
+            except:
+                # retry once if blocked
+                time.sleep(1)
+                chain = stock.option_chain(exp)
+
+            puts = chain.puts[
+                (chain.puts['strike'] < price) &
+                (chain.puts['strike'] >= price*(1-strike_dist_pct))
+            ]
+
+            for _, row in puts.iterrows():
+                mid = (row['bid'] + row['ask'])/2 if row['bid']>0 and row['ask']>0 else row['lastPrice']
+                if mid <= 0:
+                    continue
+
+                ann_ret = (mid/row['strike']) * (365/days) * 100
+                if ann_ret < min_return:
+                    continue
+
+                delta = get_delta(price, row['strike'], days/365, risk_free, vol)
+
+                results.append({
+                    'Ticker': symbol,
+                    'Exp': exp[5:],
+                    'D': days,
+                    'Strike': row['strike'],
+                    'Price': mid,
+                    'Return': ann_ret,
+                    'Delta': delta
+                })
+
+    except:
         return []
-
-    vol = get_vol(stock)
-
-    for exp in stock.options[:8]:
-        days = (datetime.strptime(exp, '%Y-%m-%d') - datetime.now()).days
-        if not (20 <= days <= 160):
-            continue
-
-        chain = stock.option_chain(exp)
-        puts = chain.puts[
-            (chain.puts['strike'] < price) &
-            (chain.puts['strike'] >= price*(1-strike_dist_pct))
-        ]
-
-        for _, row in puts.iterrows():
-            mid = (row['bid'] + row['ask'])/2 if row['bid']>0 and row['ask']>0 else row['lastPrice']
-            if mid <= 0:
-                continue
-
-            ann_ret = (mid/row['strike']) * (365/days) * 100
-            if ann_ret < min_return:
-                continue
-
-            delta = get_delta(price, row['strike'], days/365, risk_free, vol)
-
-            results.append({
-                'Ticker': symbol,
-                'Exp': exp[5:],          # shorter date (MM-DD)
-                'D': days,
-                'Strike': row['strike'],
-                'Price': mid,
-                'Return': ann_ret,
-                'Delta': delta
-            })
 
     return results
 
