@@ -164,7 +164,7 @@ if st.button('Run Scan'):
 
     df = df.sort_values('Return', ascending=False)
 
-st.dataframe(
+    st.dataframe(
     df,
     use_container_width=True,
     column_config={
