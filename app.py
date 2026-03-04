@@ -4,140 +4,141 @@ import pandas as pd
 import numpy as np
 from scipy.stats import norm
 from datetime import datetime
-import time
-import random
 
-# --- APP SETUP ---
-st.set_page_config(page_title='OTM Put Scanner - Rate Limit Protected', layout='wide')
-st.title('⌛ OTM Put Option Scanner (Throttled Mode)')
+# -----------------------
+# APP SETUP
+# -----------------------
+st.set_page_config(page_title='OTM Put Scanner', layout='wide')
+st.title('📱 OTM Put Option Scanner')
 
-# --- SIDEBAR ---
-st.sidebar.header('Parameters')
+# -----------------------
+# SIDEBAR
+# -----------------------
+default_tickers = ['O','NLY','JEPI','JEPQ','SCHD','SPYI','MORT','QYLD','RYLD','IYRI','QQQI']
 
-# Default tickers list
-default_tickers = ['O', 'NLY', 'JEPI', 'JEPQ', 'SCHD', 'SPYI', 'MORT', 'QYLD', 'RYLD', 'IYRI', 'QQQI']
-
-# Multiselect widget with default tickers
-selected_tickers = st.sidebar.multiselect(
-    'Select Tickers',
-    options=default_tickers,
-    default=default_tickers,
-    help='Select from the list or type to add new tickers'
+selected = st.sidebar.multiselect(
+    'Tickers',
+    default_tickers,
+    default=default_tickers
 )
 
-# Allow adding new tickers via text input
-new_ticker_input = st.sidebar.text_input(
-    'Add New Ticker (comma-separated)',
-    '',
-    help='Enter new ticker symbols separated by commas'
-)
+new_input = st.sidebar.text_input('Add ticker(s) comma separated')
 
-# Combine selected and new tickers
-ticker_list = selected_tickers.copy()
-if new_ticker_input:
-    new_tickers = [t.strip().upper() for t in new_ticker_input.split(',') if t.strip()]
-    ticker_list.extend(new_tickers)
+tickers = selected.copy()
+if new_input:
+    tickers += [t.strip().upper() for t in new_input.split(',')]
 
-# Remove duplicates while preserving order
-ticker_list = list(dict.fromkeys(ticker_list))
+tickers = list(dict.fromkeys(tickers))
 
 min_return = st.sidebar.slider('Min Annual Return %', 1.0, 20.0, 5.0)
 strike_dist_pct = st.sidebar.slider('Max Strike Distance %', 0.05, 0.50, 0.25)
 risk_free = st.sidebar.number_input('Risk Free Rate', 0.0, 0.1, 0.04)
 
-# --- LOGIC ---
+
+# -----------------------
+# HELPERS
+# -----------------------
+def fmt_pct(x):
+    """2 decimals max, no decimals for whole numbers"""
+    if abs(x - round(x)) < 0.01:
+        return f"{int(round(x))}%"
+    return f"{x:.2f}%"
+
+
 def get_vol(ticker_obj):
     try:
         hist = ticker_obj.history(period='1y')
-        if len(hist) < 20: return 0.30
-        return np.log(hist['Close'] / hist['Close'].shift(1)).dropna().std() * np.sqrt(252)
+        r = np.log(hist['Close'] / hist['Close'].shift(1)).dropna()
+        return r.std() * np.sqrt(252)
     except:
         return 0.30
 
+
 def get_delta(S, K, T, r, sigma):
-    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0: return 0.0
-    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    if T <= 0 or sigma <= 0:
+        return 0
+    d1 = (np.log(S/K) + (r+0.5*sigma**2)*T)/(sigma*np.sqrt(T))
     return norm.cdf(d1) - 1
 
-if st.button('Run Market Scan'):
-    if not ticker_list:
-        st.error('Please select or add at least one ticker.')
-    else:
-        results = []
-        progress_bar = st.progress(0)
-        debug_container = st.expander("Throttled Data Logs", expanded=True)
 
-        for idx, symbol in enumerate(ticker_list):
-            try:
-                stock = yf.Ticker(symbol)
-                # Small delay between tickers to avoid rate limiting
-                time.sleep(random.uniform(0.5, 1.5))
-                
-                price = None
-                try:
-                    price = stock.fast_info['last_price']
-                except: pass
+# -----------------------
+# CACHE PER TICKER
+# -----------------------
+@st.cache_data(ttl=600)  # 10 min cache
+def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free):
+    results = []
 
-                if price is None or np.isnan(price):
-                    try:
-                        price = stock.history(period='1d')['Close'].iloc[-1]
-                    except: pass
+    stock = yf.Ticker(symbol)
+    price = stock.fast_info.get('last_price')
 
-                if price is None or np.isnan(price):
-                    debug_container.error(f"❌ {symbol}: Failed to fetch price. Skipping.")
-                    continue
+    if not price:
+        return []
 
-                vol = get_vol(stock)
-                expirations = stock.options
-                
-                if not expirations:
-                    debug_container.warning(f"⚠️ {symbol}: No options found.")
-                    continue
+    vol = get_vol(stock)
 
-                valid_expiry_count = 0
-                # We only check a few expiries to keep request count low
-                for exp in expirations[:8]: 
-                    days = (datetime.strptime(exp, '%Y-%m-%d') - datetime.now()).days
-                    if not (20 <= days <= 160): continue
-                    
-                    valid_expiry_count += 1
-                    # Delay between option chain requests
-                    time.sleep(random.uniform(0.3, 0.8))
-                    
-                    try:
-                        chain = stock.option_chain(exp)
-                        puts = chain.puts[(chain.puts['strike'] < price) & (chain.puts['strike'] >= price * (1-strike_dist_pct))]
+    for exp in stock.options[:8]:
+        days = (datetime.strptime(exp, '%Y-%m-%d') - datetime.now()).days
+        if not (20 <= days <= 160):
+            continue
 
-                        if puts.empty: continue
+        chain = stock.option_chain(exp)
+        puts = chain.puts[
+            (chain.puts['strike'] < price) &
+            (chain.puts['strike'] >= price*(1-strike_dist_pct))
+        ]
 
-                        for _, row in puts.iterrows():
-                            bid, ask, last = row.get('bid', 0), row.get('ask', 0), row.get('lastPrice', 0)
-                            opt_price = (bid + ask)/2 if (bid > 0 and ask > 0) else last
-                            if opt_price <= 0.01: continue
-                            
-                            ann_ret = (opt_price / row['strike']) * (365 / days) * 100
-                            if ann_ret >= min_return:
-                                delta = get_delta(price, row['strike'], days/365, risk_free, vol)
-                                results.append({
-                                    'Ticker': symbol, 'Expiry': exp, 'Days': days, 'Strike': row['strike'],
-                                    'Opt Price': round(opt_price, 3), 'Return %': round(ann_ret, 2), 'Delta': round(delta, 3)
-                                })
-                    except Exception as e:
-                        if "Too Many Requests" in str(e):
-                            st.error("Rate limit hit! Cooling down for 5 seconds...")
-                            time.sleep(5)
-                        debug_container.write(f"Error processing {symbol} {exp}: {e}")
+        for _, row in puts.iterrows():
+            mid = (row['bid'] + row['ask'])/2 if row['bid']>0 and row['ask']>0 else row['lastPrice']
+            if mid <= 0:
+                continue
 
-                debug_container.write(f"✅ {symbol} processed.")
+            ann_ret = (mid/row['strike']) * (365/days) * 100
+            if ann_ret < min_return:
+                continue
 
-            except Exception as e:
-                debug_container.error(f"Global error for {symbol}: {e}")
+            delta = get_delta(price, row['strike'], days/365, risk_free, vol)
 
-            progress_bar.progress((idx + 1) / len(ticker_list))
+            results.append({
+                'Ticker': symbol,
+                'Exp': exp[5:],          # shorter date (MM-DD)
+                'D': days,
+                'Strike': row['strike'],
+                'Price': mid,
+                'Return': ann_ret,
+                'Delta': delta
+            })
 
-        if results:
-            df = pd.DataFrame(results)
-            st.subheader("Scan Results")
-            st.dataframe(df.sort_values('Return %', ascending=False).style.background_gradient(subset=['Return %'], cmap='RdYlGn'))
-        else:
-            st.warning('No results found. Try adjusting parameters or scanning fewer tickers at once.')
+    return results
+
+
+# -----------------------
+# MAIN
+# -----------------------
+if st.button('Run Scan'):
+
+    all_rows = []
+
+    for t in tickers:
+        all_rows.extend(
+            scan_single_ticker(t, min_return, strike_dist_pct, risk_free)
+        )
+
+    if not all_rows:
+        st.warning("No results found.")
+        st.stop()
+
+    df = pd.DataFrame(all_rows)
+
+    # formatting for mobile
+    df['Return'] = df['Return'].apply(fmt_pct)
+    df['Price'] = df['Price'].round(2)
+    df['Strike'] = df['Strike'].round(2)
+    df['Delta'] = df['Delta'].round(2)
+
+    df = df.sort_values('Return', ascending=False)
+
+    st.dataframe(
+        df,
+        use_container_width=True,
+        height=600
+    )
