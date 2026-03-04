@@ -157,15 +157,25 @@ if st.button('Run Scan'):
     df = pd.DataFrame(all_rows)
 
     # formatting for mobile
-    df['Return'] = df['Return'].apply(fmt_pct)
+    #df['Return'] = df['Return'].apply(fmt_pct)
     df['Price'] = df['Price'].round(2)
     df['Strike'] = df['Strike'].round(2)
     df['Delta'] = df['Delta'].round(2)
 
     df = df.sort_values('Return', ascending=False)
 
-    st.dataframe(
-        df,
-        use_container_width=True,
-        height=600
-    )
+st.dataframe(
+    df,
+    use_container_width=True,
+    column_config={
+        "Return": st.column_config.ProgressColumn(
+            "Return %",
+            format="%.2f%%",
+            min_value=0,
+            max_value=df["Return"].max()
+        ),
+        "Price": st.column_config.NumberColumn(format="%.2f"),
+        "Strike": st.column_config.NumberColumn(format="%.2f"),
+        "Delta": st.column_config.NumberColumn(format="%.2f"),
+    }
+)
