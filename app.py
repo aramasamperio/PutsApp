@@ -9,7 +9,7 @@ from datetime import datetime
 # APP SETUP
 # -----------------------
 st.set_page_config(page_title='OTM Put Scanner', layout='wide')
-st.title('📱 OTM Put Option Scanner')
+#st.title('📱 OTM Put Option Scanner')
 
 # -----------------------
 # SIDEBAR
@@ -30,7 +30,7 @@ if new_input:
 
 tickers = list(dict.fromkeys(tickers))
 
-min_return = st.sidebar.slider('Min Annual Return %', 1.0, 20.0, 5.0)
+min_return = st.sidebar.slider('Min Annual Return %', 1.0, 20.0, 10.0)
 strike_dist_pct = st.sidebar.slider('Max Strike Distance %', 0.05, 0.50, 0.25)
 risk_free = st.sidebar.number_input('Risk Free Rate', 0.0, 0.1, 0.04)
 
