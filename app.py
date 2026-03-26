@@ -30,7 +30,7 @@ if new_input:
 
 tickers = list(dict.fromkeys(tickers))
 
-min_return = st.sidebar.slider('Min Annual Return %', 1.0, 20.0, 10.0)
+min_return = st.sidebar.slider('Min Annual Return %', 1.0, 20.0, 8.0)
 strike_dist_pct = st.sidebar.slider('Max Strike Distance %', 0.05, 0.50, 0.25)
 risk_free = st.sidebar.number_input('Risk Free Rate', 0.0, 0.1, 0.04)
 
@@ -73,7 +73,7 @@ def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free):
 
     try:
         stock = yf.Ticker(symbol)
-
+        st.write('Ticker: '+stock)
         # small pause before each ticker
         time.sleep(random.uniform(0.4, 0.8))
 
@@ -88,10 +88,11 @@ def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free):
         vol = get_vol(stock)
 
         expiries = stock.options
+        st.write(expiries)
         if not expiries:
             return []
 
-        for exp in expiries[:6]:  # fewer calls = safer
+        for exp in expiries[:10]:  # fewer calls = safer
             days = (datetime.strptime(exp, '%Y-%m-%d') - datetime.now()).days
             if not (20 <= days <= 160):
                 continue
