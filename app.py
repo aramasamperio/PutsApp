@@ -46,8 +46,10 @@ def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free):
     results = []
     logs = []
     try:
-        # Removed custom session to avoid Yahoo API/curl_cffi conflicts
+        # Slow down initialization
+        time.sleep(random.uniform(1.0, 2.0))
         stock = yf.Ticker(symbol)
+        
         price = None
         try: price = stock.fast_info['last_price']
         except: pass
@@ -65,16 +67,22 @@ def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free):
             return [], [f"{symbol}: No Expiries found"]
 
         today = datetime.now()
-        for exp in expiries[:12]:
+        # Strictly limit to first 8 expiries to avoid rate limiting
+        for exp in expiries[:8]:
             exp_date = datetime.strptime(exp, '%Y-%m-%d')
             days = (exp_date - today).days
             if not (20 <= days <= 160): continue
+
+            # Throttle between expiry requests
+            time.sleep(random.uniform(0.5, 1.0))
 
             try:
                 chain = stock.option_chain(exp)
                 puts = chain.puts
                 if puts.empty: continue
-            except: continue
+            except Exception as e:
+                logs.append(f"{symbol} {exp}: Chain error {str(e)}")
+                continue
 
             rel_puts = puts[(puts['strike'] < price) & (puts['strike'] >= price * (1 - strike_dist_pct))]
 
@@ -91,9 +99,8 @@ def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free):
                     'Ticker': symbol, 'Expiry': exp, 'Days': days, 'Strike': row['strike'], 
                     'Opt Price': mid, 'Return': ann_ret, 'Delta': delta
                 })
-        time.sleep(random.uniform(0.6, 1.0))
     except Exception as e:
-        return [], [f"{symbol}: Error {str(e)}"]
+        return [], [f"{symbol}: Global Error {str(e)}"]
     return results, logs
 
 # --- 5. MAIN ---
@@ -107,7 +114,7 @@ if st.button('🚀 Run Scan'):
     status_text = st.empty()
 
     for i, t in enumerate(tickers):
-        status_text.text(f"Scanning {t}...")
+        status_text.text(f"Scanning {t}... (Throttle Active)")
         res, logs = scan_single_ticker(t, min_return, strike_dist_pct, risk_free)
         all_rows.extend(res)
         all_logs.extend(logs)
@@ -120,7 +127,7 @@ if st.button('🚀 Run Scan'):
 
 if st.session_state.scan_results is not None:
     if not st.session_state.scan_results:
-        st.warning("No results found matching your filters.")
+        st.warning("No results found. This often happens if the API is rate-limiting. Check debug logs.")
         if st.checkbox("Show Debug Logs"):
             for log in st.session_state.get('logs', []):
                 st.text(log)
