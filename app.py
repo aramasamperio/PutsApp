@@ -49,8 +49,8 @@ def get_vol(ticker_obj):
     except: return 0.30
 
 def get_delta(S, K, T, r, sigma):
-    if T <= 0 or sigma <= 0: return 0
-    d1 = (np.log(S/K) + (r+0.5*sigma**2)*T)/(sigma*np.sqrt(T))
+    if T <= 0 or sigma <= 0: return 0.0
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
     return norm.cdf(d1) - 1
 
 # --- 5. SCANNER ---
@@ -84,6 +84,7 @@ def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free, session):
             try:
                 chain = stock.option_chain(exp)
                 puts = chain.puts
+                if puts.empty: continue
             except: continue
 
             rel_puts = puts[(puts['strike'] < price) & (puts['strike'] >= price * (1 - strike_dist_pct))]
@@ -129,7 +130,7 @@ if st.button('🚀 Run Scan'):
     st.session_state.scan_results = all_rows
     st.session_state.logs = all_logs
 
-if st.session_state.scan_results is not null:
+if st.session_state.scan_results is not None:
     if not st.session_state.scan_results:
         st.warning("No results found matching your filters.")
         if st.checkbox("Show Debug Logs"):
