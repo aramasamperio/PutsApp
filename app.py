@@ -67,7 +67,7 @@ def get_delta(S, K, T, r, sigma):
 import time
 import random
 
-@st.cache_data(ttl=600)
+#@st.cache_data(ttl=600)
 def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free):
     results = []
 
