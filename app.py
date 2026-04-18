@@ -18,7 +18,7 @@ st.set_page_config(page_title='OTM Put Scanner', layout='wide')
 st.title('📱 OTM Put Option Scanner')
 
 # --- 2. SIDEBAR ---
-default_tickers = ['O','NLY','JEPI','JEPQ','SCHD','SPYI','MORT','QYLD','RYLD','IYRI','QQQI']
+default_tickers = ['O','NLY','JEPI','JEPQ','SCHD','SPYI','MORT','QYLD','RYLD','IYRI','QQQI','BTCI']
 selected = st.sidebar.multiselect('Tickers', default_tickers, default=default_tickers)
 new_input = st.sidebar.text_input('Add ticker(s) comma separated')
 tickers = list(dict.fromkeys(selected + [t.strip().upper() for t in new_input.split(',')] if new_input else selected))
@@ -94,10 +94,10 @@ def scan_single_ticker(symbol, min_return, strike_dist_pct, risk_free):
                 ann_ret = (mid / row['strike']) * (365 / days) * 100
                 if ann_ret < min_return: continue
 
-                delta = get_delta(price, row['strike'], days/365, risk_free, vol)
+                #delta = get_delta(price, row['strike'], days/365, risk_free, vol)
                 results.append({
                     'Ticker': symbol, 'Expiry': exp, 'Days': days, 'Strike': row['strike'], 
-                    'Opt Price': mid, 'Return': ann_ret, 'Delta': delta
+                    'Opt Price': mid, 'Return': ann_ret#, 'Delta': delta
                 })
     except Exception as e:
         return [], [f"{symbol}: Global Error {str(e)}"]
